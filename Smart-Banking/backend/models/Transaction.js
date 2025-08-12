@@ -1,27 +1,51 @@
 const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema({
-  fromUser: {
+  fromAccount: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
+    ref: "Account",
+    required: function() {
+      return this.type !== "deposit"; // required except for deposits
+    }
   },
-  toUser: {
+  fromUserName: {
+    type: String,
+    required: function() {
+      return this.type !== "deposit"; // required except for deposits
+    }
+  },
+  toAccount: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
+    ref: "Account",
+    required: function() {
+      return this.type !== "withdrawal"; // required except for withdrawals
+    }
+  },
+  toUserName: {
+    type: String,
+    required: function() {
+      return this.type !== "withdrawal"; // required except for withdrawals
+    }
   },
   amount: {
     type: Number,
     required: true,
+    min: 1
   },
-  timestamp: {
-    type: Date,
-    default: Date.now,
+  status: {
+    type: String,
+    enum: ["success", "failed"],
+    default: "success"
   },
-}, {
-  timestamps: true,
-});
+  description: String,
+  type: {
+    type: String,
+    enum: ["transfer", "deposit", "withdrawal"],
+    default: "transfer"
+  }
+}, { timestamps: true });
 
 module.exports = mongoose.model("Transaction", transactionSchema);
+
+
 

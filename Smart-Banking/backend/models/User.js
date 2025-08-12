@@ -23,9 +23,21 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // NEW: KYC Status
+  kycStatus: {
+    type: String,
+    enum: ["pending", "approved", "rejected"],
+    default: "pending",
+  },
+  // NEW: Store submitted KYC details (like documents, address, etc.)
+  kycData: {
+    type: Object,
+    default: {},
+  },
 }, {
   timestamps: true,
 });
 
 module.exports = mongoose.model("User", userSchema);
+
 

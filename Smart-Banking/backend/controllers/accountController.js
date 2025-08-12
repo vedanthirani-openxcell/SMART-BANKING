@@ -1,5 +1,5 @@
-// controllers/accountController.js
 const Account = require("../models/Account");
+const User = require("../models/User");
 
 // Submit KYC request
 const submitKYC = async (req, res) => {
@@ -10,14 +10,14 @@ const submitKYC = async (req, res) => {
       return res.status(400).json({ message: "All KYC fields are required" });
     }
 
-    // Check if user already submitted KYC
-    const existing = await Account.findOne({ user: req.user.userId });
+
+    const existing = await Account.findOne({ user: req.user.user });
     if (existing) {
       return res.status(400).json({ message: "KYC already submitted or account exists" });
     }
 
     const account = new Account({
-      user: req.user.userId, // ✅ matches schema field
+      user: req.user.user, 
       kycDetails: { aadhar, pan, dob, address },
       kycStatus: "pending"
     });
@@ -38,7 +38,7 @@ const generateAccountNumber = () => {
 const updateKYCStatus = async (req, res) => {
   try {
     const { status } = req.body;
-
+   
     if (!["approved", "rejected"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
@@ -53,6 +53,12 @@ const updateKYCStatus = async (req, res) => {
     }
 
     await account.save();
+
+    // ✅ No change here since account.user is still an ObjectId
+    await User.findByIdAndUpdate(account.user, {
+      kycStatus: status
+    });
+
     res.json({ message: `KYC ${status} successfully`, account });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -60,6 +66,7 @@ const updateKYCStatus = async (req, res) => {
 };
 
 module.exports = { submitKYC, updateKYCStatus };
+
 
 
 
