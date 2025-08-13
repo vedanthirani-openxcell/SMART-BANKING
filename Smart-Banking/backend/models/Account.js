@@ -30,7 +30,15 @@ const accountSchema = new mongoose.Schema({
     type: String,
     enum: ["pending", "approved", "rejected"],
     default: "pending"
+  },
+   kycRejectionReason: { type: String },
+   
+  accountType: {  // <--- Add this field
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "AccountType",
+   
   }
+   
 }, { timestamps: true });
 
 module.exports = mongoose.model("Account", accountSchema);

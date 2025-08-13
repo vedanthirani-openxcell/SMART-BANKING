@@ -2,18 +2,19 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// Register User
 exports.register = async (req, res) => {
   try {
-    const { name, email, password ,isAdmin} = req.body;
+    const { name, email, password, isAdmin } = req.body;
 
+    // Check if user already exists
     const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: "User already exists" });
+    if (existingUser) {
+      return res.status(400).json({ message: "User already exists" });
+    }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({ name, email, password: hashedPassword ,isAdmin });
-    await newUser.save();
+    // No need to hash manually — pre hook will do it
+    const newUser = new User({ name, email, password, isAdmin });
+    await newUser.save(); // password gets hashed here automatically
 
     res.status(201).json({ message: "User registered successfully" });
   } catch (err) {

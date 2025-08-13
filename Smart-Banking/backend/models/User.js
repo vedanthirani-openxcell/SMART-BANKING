@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs"); // for hashing passwords
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -23,13 +24,11 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  // NEW: KYC Status
   kycStatus: {
     type: String,
     enum: ["pending", "approved", "rejected"],
     default: "pending",
   },
-  // NEW: Store submitted KYC details (like documents, address, etc.)
   kycData: {
     type: Object,
     default: {},
@@ -38,6 +37,22 @@ const userSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+// 🔹 Pre-save hook for hashing password
+userSchema.pre("save", async function (next) {
+  // Only hash if password is new or modified
+  if (!this.isModified("password")) return next();
+
+  try {
+    // Generate salt & hash password
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = mongoose.model("User", userSchema);
+
 
 

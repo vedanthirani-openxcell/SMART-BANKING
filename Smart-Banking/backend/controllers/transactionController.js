@@ -179,3 +179,106 @@ exports.withdrawFunds = async (req, res) => {
 };
 
 
+
+exports.getTransactionHistory = async (req, res) => {
+  try {
+     const userId = req.user.user;
+        const user = await User.findById(userId).select("kycStatus");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.kycStatus !== "approved") {
+      return res.status(403).json({ message: "KYC not approved. Please complete verification." });
+    }
+    
+
+    // Step 1: Parse query params with defaults
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const type = req.query.type; // optional: deposit, withdrawal, transfer
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+
+    // Step 2: Find all accounts belonging to this user
+    const userAccounts = await Account.find({ user: userId }).select("_id accountNumber");
+    if (!userAccounts.length) {
+      return res.status(404).json({ message: "No accounts found for user" });
+    }
+    const userAccountIds = userAccounts.map(acc => acc._id);
+
+    // Step 3: Build transaction query to find transactions where
+    // fromAccount OR toAccount is in user's accounts
+    const query = {
+      $or: [
+        { fromAccount: { $in: userAccountIds } },
+        { toAccount: { $in: userAccountIds } }
+      ]
+    };
+
+    // Filter by type if provided
+    if (type) {
+      query.type = type;
+    }
+
+    // Filter by date range if provided
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = fromDate;
+      if (toDate) query.createdAt.$lte = toDate;
+    }
+
+    // Step 4: Fetch total count for pagination metadata
+    const totalTransactions = await Transaction.countDocuments(query);
+
+    // Calculate total pages
+    const totalPages = Math.ceil(totalTransactions / limit);
+
+    // Fetch transactions with pagination and sort by newest first
+    // Also populate the accountNumber for fromAccount and toAccount
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate({
+        path: "fromAccount",
+        select: "accountNumber"
+      })
+      .populate({
+        path: "toAccount",
+        select: "accountNumber"
+      });
+
+    // Step 5: Format response transactions (add userName fields from stored fields)
+    const formattedTransactions = transactions.map(txn => ({
+      _id: txn._id,
+      fromAccount: txn.fromAccount ? {
+        accountNumber: txn.fromAccount.accountNumber,
+        userName: txn.fromUserName
+      } : null,
+      toAccount: txn.toAccount ? {
+        accountNumber: txn.toAccount.accountNumber,
+        userName: txn.toUserName
+      } : null,
+      amount: txn.amount,
+      type: txn.type,
+      status: txn.status,
+      description: txn.description,
+      createdAt: txn.createdAt,
+    }));
+
+    // Step 6: Send response
+    res.status(200).json({
+      page,
+      limit,
+      totalTransactions,
+      totalPages,
+      transactions: formattedTransactions
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error." });
+  }
+};
+
+
