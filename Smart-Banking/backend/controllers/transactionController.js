@@ -1,13 +1,15 @@
 const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const Transaction = require("../models/Transaction");
+const sendEmail = require("../utils/emailService");
 
 exports.transferFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { fromAccountNumber, toAccountNumber, amount, description } = req.body;
+    const { fromAccountNumber, toAccountNumber, amount, description } =
+      req.body;
 
     if (!fromAccountNumber || !toAccountNumber || !amount) {
       throw new Error("All fields are required.");
@@ -16,14 +18,24 @@ exports.transferFunds = async (req, res) => {
       throw new Error("Amount must be greater than 0.");
     }
 
-    const fromAccount = await Account.findOne({ accountNumber: fromAccountNumber }).populate("user", "name").session(session);
-    const toAccount = await Account.findOne({ accountNumber: toAccountNumber }).populate("user", "name").session(session);
+    const fromAccount = await Account.findOne({
+      accountNumber: fromAccountNumber,
+    })
+      .populate("user", "name email")
+      .session(session);
+
+    const toAccount = await Account.findOne({ accountNumber: toAccountNumber })
+      .populate("user", "name email")
+      .session(session);
 
     if (!fromAccount || !toAccount) {
       throw new Error("Account not found.");
     }
 
-    if (fromAccount.kycStatus !== "approved" || toAccount.kycStatus !== "approved") {
+    if (
+      fromAccount.kycStatus !== "approved" ||
+      toAccount.kycStatus !== "approved"
+    ) {
       throw new Error("Both accounts must have approved KYC.");
     }
 
@@ -38,36 +50,69 @@ exports.transferFunds = async (req, res) => {
     await fromAccount.save({ session });
     await toAccount.save({ session });
 
-    // Optionally update user balance if you keep that there (but generally avoid duplication)
-    await fromAccount.user.save({ session });
-    await toAccount.user.save({ session });
-
     // Create transaction record
-    const transaction = await Transaction.create([{
-      fromAccount: fromAccount._id,
-      fromUserName: fromAccount.user.name,
-      toAccount: toAccount._id,
-      toUserName: toAccount.user.name,
-      amount,
-      description: description || `Transfer from ${fromAccountNumber} to ${toAccountNumber}`,
-      status: "success"
-    }], { session });
+    const transaction = await Transaction.create(
+      [
+        {
+          fromAccount: fromAccount._id,
+          fromUserName: fromAccount.user.name,
+          toAccount: toAccount._id,
+          toUserName: toAccount.user.name,
+          amount,
+          description:
+            description ||
+            `Transfer from ${fromAccountNumber} to ${toAccountNumber}`,
+          status: "success",
+          type: "transfer",
+        },
+      ],
+      { session }
+    );
+
+    // Email to sender
+    const senderSubject = "Funds Transferred Successfully";
+    const senderText = `Hello ${fromAccount.user.name},
+
+An amount of ₹${amount} has been transferred from your account (${fromAccountNumber}) to ${
+      toAccount.user.name
+    } (${toAccountNumber}).
+
+Description: ${description || "Transfer"}
+Updated Balance: ₹${fromAccount.balance}
+
+Thank you for banking with us!
+`;
+    await sendEmail(fromAccount.user.email, senderSubject, senderText);
+
+    // Email to receiver
+    const receiverSubject = "Funds Received Successfully";
+    const receiverText = `Hello ${toAccount.user.name},
+
+An amount of ₹${amount} has been credited to your account (${toAccountNumber}) from ${
+      fromAccount.user.name
+    } (${fromAccountNumber}).
+
+Description: ${description || "Transfer"}
+Updated Balance: ₹${toAccount.balance}
+
+Thank you for banking with us!
+`;
+    await sendEmail(toAccount.user.email, receiverSubject, receiverText);
 
     await session.commitTransaction();
     session.endSession();
 
     res.status(200).json({
       message: "Transfer successful.",
-      transaction: transaction[0]
+      transaction: transaction[0],
     });
-
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error(error);
     res.status(400).json({ message: error.message || "Server error." });
   }
 };
+
 exports.depositFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -82,7 +127,9 @@ exports.depositFunds = async (req, res) => {
       throw new Error("Amount must be greater than zero.");
     }
 
-    const account = await Account.findOne({ accountNumber }).populate("user", "name").session(session);
+    const account = await Account.findOne({ accountNumber })
+      .populate("user", "name email")
+      .session(session);
     if (!account) {
       throw new Error("Account not found.");
     }
@@ -94,27 +141,44 @@ exports.depositFunds = async (req, res) => {
     // Add balance
     account.balance += amount;
     await account.save({ session });
-      
+    const userEmail = account.user.email; // make sure you populate email
+    console.log(userEmail);
+    const subject = "Deposit Successful";
+    const text = `Hello ${account.user.name},
+
+An amount of ₹${amount} has been deposited to your account (${accountNumber}).
+
+Description: ${description || "Deposit"}
+Updated Balance: ₹${account.balance}
+
+Thank you for banking with us!
+`;
+
+    await sendEmail(userEmail, subject, text);
 
     // Record transaction
-    const transaction = await Transaction.create([{
-      fromAccount: null, // no sender for deposit
-      toAccount: account._id,
-      toUserName: account.user.name,
-      amount,
-      description: description || `Deposit to account ${accountNumber}`,
-      status: "success",
-      type: "deposit"
-    }], { session });
+    const transaction = await Transaction.create(
+      [
+        {
+          fromAccount: null, // no sender for deposit
+          toAccount: account._id,
+          toUserName: account.user.name,
+          amount,
+          description: description || `Deposit to account ${accountNumber}`,
+          status: "success",
+          type: "deposit",
+        },
+      ],
+      { session }
+    );
 
     await session.commitTransaction();
     session.endSession();
 
     res.status(200).json({
       message: "Deposit successful.",
-      transaction: transaction[0]
+      transaction: transaction[0],
     });
-
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -135,7 +199,10 @@ exports.withdrawFunds = async (req, res) => {
       throw new Error("Amount must be greater than zero.");
     }
 
-    const account = await Account.findOne({ accountNumber }).populate("user", "name").session(session);
+    const account = await Account.findOne({ accountNumber })
+      .populate("user", "name email")
+      .session(session);
+
     if (!account) {
       throw new Error("Account not found.");
     }
@@ -151,26 +218,47 @@ exports.withdrawFunds = async (req, res) => {
     // Subtract balance
     account.balance -= amount;
     await account.save({ session });
-      
+
+    const userEmail = account.user.email;
+    console.log(userEmail);
+
+    const subject = "Withdrawal Successful";
+    const text = `Hello ${account.user.name},
+
+An amount of ₹${amount} has been withdrawn from your account (${accountNumber}).
+
+Description: ${description || "Withdrawal"}
+Updated Balance: ₹${account.balance}
+
+Thank you for banking with us!
+`;
+
+    await sendEmail(userEmail, subject, text);
+
     // Record transaction
-    const transaction = await Transaction.create([{
-      fromAccount: account._id,
-      toAccount: null, // no receiver for withdrawal
-      fromUserName: account.user.name,
-      amount,
-      description: description || `Withdrawal from account ${accountNumber}`,
-      status: "success",
-      type: "withdrawal"
-    }], { session });
+    const transaction = await Transaction.create(
+      [
+        {
+          fromAccount: account._id,
+          toAccount: null, // no receiver for withdrawal
+          fromUserName: account.user.name,
+          amount,
+          description:
+            description || `Withdrawal from account ${accountNumber}`,
+          status: "success",
+          type: "withdrawal",
+        },
+      ],
+      { session }
+    );
 
     await session.commitTransaction();
     session.endSession();
 
     res.status(200).json({
       message: "Withdrawal successful.",
-      transaction: transaction[0]
+      transaction: transaction[0],
     });
-
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -178,19 +266,18 @@ exports.withdrawFunds = async (req, res) => {
   }
 };
 
-
-
 exports.getTransactionHistory = async (req, res) => {
   try {
-     const userId = req.user.user;
-        const user = await User.findById(userId).select("kycStatus");
+    const userId = req.user.user;
+    const user = await User.findById(userId).select("kycStatus");
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
     if (user.kycStatus !== "approved") {
-      return res.status(403).json({ message: "KYC not approved. Please complete verification." });
+      return res
+        .status(403)
+        .json({ message: "KYC not approved. Please complete verification." });
     }
-    
 
     // Step 1: Parse query params with defaults
     const page = parseInt(req.query.page) || 1;
@@ -200,19 +287,21 @@ exports.getTransactionHistory = async (req, res) => {
     const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
 
     // Step 2: Find all accounts belonging to this user
-    const userAccounts = await Account.find({ user: userId }).select("_id accountNumber");
+    const userAccounts = await Account.find({ user: userId }).select(
+      "_id accountNumber"
+    );
     if (!userAccounts.length) {
       return res.status(404).json({ message: "No accounts found for user" });
     }
-    const userAccountIds = userAccounts.map(acc => acc._id);
+    const userAccountIds = userAccounts.map((acc) => acc._id);
 
     // Step 3: Build transaction query to find transactions where
     // fromAccount OR toAccount is in user's accounts
     const query = {
       $or: [
         { fromAccount: { $in: userAccountIds } },
-        { toAccount: { $in: userAccountIds } }
-      ]
+        { toAccount: { $in: userAccountIds } },
+      ],
     };
 
     // Filter by type if provided
@@ -241,24 +330,28 @@ exports.getTransactionHistory = async (req, res) => {
       .limit(limit)
       .populate({
         path: "fromAccount",
-        select: "accountNumber"
+        select: "accountNumber",
       })
       .populate({
         path: "toAccount",
-        select: "accountNumber"
+        select: "accountNumber",
       });
 
     // Step 5: Format response transactions (add userName fields from stored fields)
-    const formattedTransactions = transactions.map(txn => ({
+    const formattedTransactions = transactions.map((txn) => ({
       _id: txn._id,
-      fromAccount: txn.fromAccount ? {
-        accountNumber: txn.fromAccount.accountNumber,
-        userName: txn.fromUserName
-      } : null,
-      toAccount: txn.toAccount ? {
-        accountNumber: txn.toAccount.accountNumber,
-        userName: txn.toUserName
-      } : null,
+      fromAccount: txn.fromAccount
+        ? {
+            accountNumber: txn.fromAccount.accountNumber,
+            userName: txn.fromUserName,
+          }
+        : null,
+      toAccount: txn.toAccount
+        ? {
+            accountNumber: txn.toAccount.accountNumber,
+            userName: txn.toUserName,
+          }
+        : null,
       amount: txn.amount,
       type: txn.type,
       status: txn.status,
@@ -272,13 +365,10 @@ exports.getTransactionHistory = async (req, res) => {
       limit,
       totalTransactions,
       totalPages,
-      transactions: formattedTransactions
+      transactions: formattedTransactions,
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error." });
   }
 };
-
-
