@@ -7,8 +7,7 @@ const accountSchema = new mongoose.Schema({
     required: true
   },
   accountNumber: {
-    type: String,
-    unique: true
+    type: String
     // not required here, we can generate later in controller when KYC approved
   },
   ifscCode: {

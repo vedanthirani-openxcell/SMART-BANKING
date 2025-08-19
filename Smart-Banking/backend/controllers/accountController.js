@@ -100,27 +100,39 @@ const submitKYC = async (req, res) => {
 
 
 // Generate account number
-const generateAccountNumber = () => {
-  return "BANK" + Math.floor(10000000 + Math.random() * 90000000);
+const generateAccountNumber = async () => {
+  let accountNumber;
+  let exists = true;
+
+  while (exists) {
+    accountNumber = Math.floor(1000000000 + Math.random() * 9000000000); // 10-digit number
+    const account = await Account.findOne({ accountNumber });
+    if (!account) exists = false;
+  }
+
+  return accountNumber;
 };
+
+
+
 const updateKYCStatus = async (req, res) => {
   try {
-    const { status, reason } = req.body;
+    const { kycStatus, reason } = req.body;
 
-    if (!["approved", "rejected"].includes(status)) {
+    if (!["approved", "rejected"].includes(kycStatus)) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
     const account = await Account.findById(req.params.id);
     if (!account) return res.status(404).json({ message: "Account not found" });
 
-    account.kycStatus = status;
+    account.kycStatus = kycStatus;
 
-    if (status === "approved" && !account.accountNumber) {
+    if (kycStatus === "approved" && !account.accountNumber) {
       account.accountNumber = generateAccountNumber();
     }
 
-    if (status === "rejected") {
+    if (kycStatus=== "rejected") {
       account.accountNumber = null; // remove account number
       account.kycRejectionReason = reason || null;
     }
@@ -131,14 +143,14 @@ const updateKYCStatus = async (req, res) => {
     const user = await User.findById(account.user).select("name email");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    user.kycStatus = status;
+    user.kycStatus = kycStatus;
     await user.save();
 
     // Prepare email
     if (user.email && /\S+@\S+\.\S+/.test(user.email)) {
       let subject, text;
 
-      if (status === "approved") {
+      if (kycStatus === "approved") {
         subject = "KYC Approved ✅";
         text = `Hello ${user.name},\n\nYour KYC has been approved successfully!\nYour account number is: ${account.accountNumber}\n\nThank you for banking with us.`;
       } else {
@@ -153,7 +165,7 @@ const updateKYCStatus = async (req, res) => {
       }
     }
 
-    res.json({ message: `KYC ${status} successfully`, account });
+    res.json({ message: `KYC ${kycStatus} successfully`, account });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -177,6 +189,7 @@ const listKYCRequests = async (req, res) => {
     // Fetch accounts with user info, pagination, sorted by newest first
     const accounts = await Account.find(filter)
       .populate("user", "name email")
+      .populate("accountType", "name")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
@@ -198,18 +211,14 @@ const listKYCRequests = async (req, res) => {
 
 const listUsers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = parseInt(req.query.page);
+    const limit = parseInt(req.query.limit);
     const search = req.query.search || "";
-    const kycStatus = req.query.kycStatus;
 
-    // Build filter object
-    const filter = {};
+    // Base filter: only non-admin users
+    const filter = { isAdmin: false };
 
-    if (kycStatus && ["pending", "approved", "rejected"].includes(kycStatus)) {
-      filter.kycStatus = kycStatus;
-    }
-
+    // Add search filter if provided
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
@@ -220,7 +229,7 @@ const listUsers = async (req, res) => {
     const total = await User.countDocuments(filter);
 
     const users = await User.find(filter)
-      .select("-password") // exclude password field
+      .select("name email") // only include name & email
       .skip((page - 1) * limit)
       .limit(limit)
       .sort({ createdAt: -1 });
@@ -237,37 +246,6 @@ const listUsers = async (req, res) => {
   } catch (error) {
     console.error("Error listing users:", error);
     res.status(500).json({ message: "Server error" });
-  }
-};
-const createAccountTypes = async (req, res) => {
-  try {
-    const { name, interestRate, overdraftLimit, minBalance } = req.body;
-
-    if (!name || !minBalance || interestRate === undefined) {
-      return res
-        .status(400)
-        .json({ message: "Name and interest rate are required" });
-    }
-
-    // Check if already exists
-    const exists = await AccountType.findOne({ name });
-    if (exists) {
-      return res.status(400).json({ message: "Account type already exists" });
-    }
-
-    const accountType = new AccountType({
-      name,
-      interestRate,
-      overdraftLimit,
-      minBalance,
-    });
-
-    await accountType.save();
-    res
-      .status(201)
-      .json({ message: "Account type created successfully", accountType });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
   }
 };
 
@@ -374,6 +352,8 @@ const adminUpdateAccount = async (req, res) => {
       account.accountNumber = null;
     }
 
+    
+
     await account.save();
 
     // Sync user's KYC status in User model
@@ -413,12 +393,14 @@ const adminDeleteAccount = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
+// controllers/accountController.js
 const downloadAccountStatement = async (req, res) => {
   try {
-    const { accountNumber, startDate, endDate } = req.query;
+    const { accountId, startDate, endDate } = req.query;
 
-    const account = await Account.findOne({ accountNumber }).populate("user", "name email");
+    if (!accountId) throw new Error("Account ID is required");
+
+    const account = await Account.findById(accountId).populate("user", "name email");
     if (!account) throw new Error("Account not found");
 
     const filter = {
@@ -440,12 +422,12 @@ const downloadAccountStatement = async (req, res) => {
   }
 };
 
+
 module.exports = {
   submitKYC,
   updateKYCStatus,
   listKYCRequests,
   listUsers,
-  createAccountTypes,
   getAccountStatement,
   adminUpdateAccount,
   adminDeleteAccount,

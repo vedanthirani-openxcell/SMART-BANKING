@@ -3,12 +3,16 @@ const cors = require('cors');
 const authRoutes = require('../routes/authRoutes');
 const userRoutes = require("../routes/userRoutes");
 const adminRoutes = require("../routes/AdminRoutes");
-const transactionRoutes = require("../routes/transactionRoutes");
+
 
 const createApp = () => {
   const app = express();
 
-  app.use(cors());
+  app.use(cors({
+  origin: 'http://localhost:5173', // Your React frontend URL
+  methods: ['GET', 'POST', 'PUT','PATCH', 'DELETE'],
+  credentials: true
+}));
   app.use(express.json());
 
   app.get('/', (req, res) => {
@@ -18,7 +22,6 @@ const createApp = () => {
   app.use('/api/auth', authRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/admin', adminRoutes);
-  app.use('/api/transactions', transactionRoutes);
 
   return app;
 };

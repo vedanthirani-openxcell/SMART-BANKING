@@ -24,6 +24,7 @@ exports.register = async (req, res) => {
 
 // Login User
 exports.login = async (req, res) => {
+  console.log(req.body);
   try {
     const { email, password } = req.body;
 
@@ -38,13 +39,16 @@ exports.login = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
+res.status(200).json({
+  token,
+  user: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    isAdmin: user.isAdmin
+  }
+});
 
-    res.status(200).json({
-      token,
-      user: user._id,
-      name: user.name,
-      email: user.email
-    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

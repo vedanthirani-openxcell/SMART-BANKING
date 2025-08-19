@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const Transaction = require("../models/Transaction");
 const sendEmail = require("../utils/emailService");
+const User=require("../models/User");
 
 exports.transferFunds = async (req, res) => {
   const session = await mongoose.startSession();
@@ -360,6 +361,79 @@ exports.getTransactionHistory = async (req, res) => {
     }));
 
     // Step 6: Send response
+    res.status(200).json({
+      page,
+      limit,
+      totalTransactions,
+      totalPages,
+      transactions: formattedTransactions,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error." });
+  }
+};
+// For Admin: Get ALL transactions
+exports.getAllTransactions = async (req, res) => {
+  try {
+    // Step 1: Parse query params with defaults
+    const page = parseInt(req.query.page) ;
+    const limit = parseInt(req.query.limit) ;
+    const type = req.query.type;
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+
+    // Step 2: Build query for all transactions
+    const query = {};
+    if (type) query.type = type;
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = fromDate;
+      if (toDate) query.createdAt.$lte = toDate;
+    }
+
+    // Step 3: Get total count
+    const totalTransactions = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalTransactions / limit);
+
+    // Step 4: Fetch with pagination, populate accounts
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate({
+        path: "fromAccount",
+        select: "accountNumber user",
+        populate: { path: "user", select: "name email" },
+      })
+      .populate({
+        path: "toAccount",
+        select: "accountNumber user",
+        populate: { path: "user", select: "name email" },
+      });
+
+    // Step 5: Format
+    const formattedTransactions = transactions.map((txn) => ({
+      _id: txn._id,
+      fromAccount: txn.fromAccount
+        ? {
+            accountNumber: txn.fromAccount.accountNumber,
+            userName: txn.fromAccount.user?.name,
+          }
+        : null,
+      toAccount: txn.toAccount
+        ? {
+            accountNumber: txn.toAccount.accountNumber,
+            userName: txn.toAccount.user?.name,
+          }
+        : null,
+      amount: txn.amount,
+      type: txn.type,
+      status: txn.status,
+      description: txn.description,
+      createdAt: txn.createdAt,
+    }));
+
     res.status(200).json({
       page,
       limit,
