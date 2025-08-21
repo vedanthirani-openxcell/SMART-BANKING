@@ -15,6 +15,13 @@ import Users from "./pages/Users";
 import UserDashboard from "./pages/UserDashboard";
 import AccountTypes from "./pages/AccountTypes";
 import Transactions from "./pages/Transactions";
+import AccountStatement from "./pages/Statement";
+import UserTransactions from "./pages/UsersTransactions";
+import FundTransfer from "./pages/FundTransfer";
+import KycApproval from "./pages/KycSubmit";
+import ManageAccounts from "./pages/ManualByAdmin";
+import ForgotPassword from "./pages/forgetPassword"; // add this
+
 
 // Helper to get user from localStorage
 const getUser = () => {
@@ -59,6 +66,21 @@ function App() {
             )
           }
         />
+        <Route
+  path="/forgot-password"
+  element={
+    user ? (
+      user.isAdmin ? (
+        <Navigate to="/admin-dashboard" />
+      ) : (
+        <Navigate to="/user-dashboard" />
+      )
+    ) : (
+      <ForgotPassword />
+    )
+  }
+/>
+
         <Route
           path="/register"
           element={
@@ -116,6 +138,14 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/admin-dashboard/manage-accounts"
+          element={
+            <ProtectedRoute role="admin">
+              <ManageAccounts />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="/user-dashboard"
@@ -125,6 +155,40 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/user/account-statement"
+          element={
+            <ProtectedRoute role="user">
+              <AccountStatement />
+            </ProtectedRoute>
+          }
+        />
+          <Route
+          path="/user/transactions"
+          element={
+            <ProtectedRoute role="user">
+              <UserTransactions />
+            </ProtectedRoute>
+          }
+        />
+          <Route
+          path="/user/transfer"
+          element={
+            <ProtectedRoute role="user">
+              <FundTransfer />
+            </ProtectedRoute>
+          }
+        />
+         <Route
+          path="/user/kyc-approval"
+          element={
+            <ProtectedRoute role="user">
+              <KycApproval />
+            </ProtectedRoute>
+          }
+        />
+
+
 
         {/* Default */}
         <Route path="*" element={<Navigate to="/" />} />

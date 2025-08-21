@@ -4,99 +4,105 @@ const AccountType = require("../models/AccountType");
 const Transaction = require("../models/Transaction");
 const sendEmail = require("../utils/emailService");
 const { generateAccountStatementPDF } = require("../utils/pdfService");
+const bcrypt = require("bcryptjs");
 
 // Submit KYC request
+// controllers/kycController.j
+
+// ✅ Submit KYC Request
 const submitKYC = async (req, res) => {
   try {
-    console.log("Submit KYC called with body:", req.body);
+    
 
-    const { aadhar, pan, dob, address, accountType } = req.body;
+    const { aadhar, pan, dob, address, accountType, name, phone } = req.body;
 
+    // 🔒 Mandatory field validation
     if (!aadhar || !pan || !dob || !address || !accountType) {
-      return res
-        .status(400)
-        .json({ message: "All KYC fields and account type are required" });
+      return res.status(400).json({
+        message: "Aadhar, PAN, DOB, Address, and Account Type are required",
+      });
     }
 
+    // 🔎 Fetch account type by name
     const accountTypeData = await AccountType.findOne({ name: accountType });
     if (!accountTypeData) {
       return res.status(404).json({ message: "Account type not found" });
     }
 
+    // 🔎 Check if account already exists for this user
     let existing = await Account.findOne({ user: req.user.user });
 
     if (existing && existing.kycStatus !== "rejected") {
-      return res
-        .status(400)
-        .json({ message: "KYC already submitted or account exists" });
+      return res.status(400).json({
+        message: "KYC already submitted or account exists",
+      });
     }
 
-    // Get user info from DB to ensure we have email and name
+    // 🔎 Get user info
     const user = await User.findById(req.user.user).select("name email");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const userEmail = user.email;
     const userName = user.name;
 
+    // 📝 Build KYC details
+    const kycDetails = { aadhar, pan, dob, address };
+    if (name) kycDetails.name = name;
+    if (phone) kycDetails.phone = phone;
+
+    let account;
+
+    // 🔄 Resubmission (when rejected)
     if (existing && existing.kycStatus === "rejected") {
-      existing.kycDetails = { aadhar, pan, dob, address };
+      existing.kycDetails = kycDetails;
       existing.kycStatus = "pending";
       existing.accountType = accountTypeData._id;
       await existing.save();
-
-      const populatedAccount = await Account.findById(existing._id).populate(
-        "accountType",
-        "name"
-      );
-
-      // Send email only if email exists
-      if (userEmail) {
-        await sendEmail(
-          userEmail,
-          "KYC Resubmitted",
-          `Hello ${userName},\n\nYour KYC has been resubmitted successfully. Please wait for admin approval.`
-        );
-      }
-
-      return res.status(200).json({
-        message: "KYC resubmitted successfully",
-        account: populatedAccount,
+      account = existing;
+    } else {
+      // 🆕 First-time submission
+      account = new Account({
+        user: req.user.user,
+        kycDetails,
+        kycStatus: "pending",
+        accountType: accountTypeData._id,
       });
+      await account.save();
     }
 
-    // If no existing account or rejected
-    const account = new Account({
-      user: req.user.user,
-      kycDetails: { aadhar, pan, dob, address },
-      kycStatus: "pending",
-      accountType: accountTypeData._id,
-    });
-
-    await account.save();
-
+    // 🎯 Populate account type
     const populatedAccount = await Account.findById(account._id).populate(
       "accountType",
       "name"
     );
 
-    // Send email only if email exists
+    // 📧 Send email notification
     if (userEmail) {
-      await sendEmail(
-        userEmail,
-        "KYC Submitted",
-        `Hello ${userName},\n\nYour KYC has been submitted successfully. Please wait for admin approval.`
-      );
+      const subject =
+        existing?.kycStatus === "rejected"
+          ? "KYC Resubmitted"
+          : "KYC Submitted";
+      const body = `Hello ${userName},\n\nYour KYC has been ${
+        existing?.kycStatus === "rejected" ? "resubmitted" : "submitted"
+      } successfully. Please wait for admin approval.`;
+
+      await sendEmail(userEmail, subject, body);
     }
 
     res.status(201).json({
-      message: "KYC submitted successfully",
+      message:
+        existing?.kycStatus === "rejected"
+          ? "KYC resubmitted successfully"
+          : "KYC submitted successfully",
       account: populatedAccount,
     });
   } catch (err) {
-    console.error("Error in submitKYC:", err);
+    console.error("❌ Error in submitKYC:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
+module.exports = { submitKYC };
 
 
 // Generate account number
@@ -128,14 +134,16 @@ const updateKYCStatus = async (req, res) => {
 
     account.kycStatus = kycStatus;
 
-    if (kycStatus === "approved" && !account.accountNumber) {
-      account.accountNumber = generateAccountNumber();
-    }
+ if (kycStatus === "approved" && !account.accountNumber) {
+  account.accountNumber = await generateAccountNumber();
+}
 
-    if (kycStatus=== "rejected") {
-      account.accountNumber = null; // remove account number
-      account.kycRejectionReason = reason || null;
-    }
+if (kycStatus === "rejected") {
+  account.accountNumber = null; // remove account number
+  account.kycRejectionReason = reason || null;
+}
+
+    
 
     await account.save();
 
@@ -174,8 +182,8 @@ const updateKYCStatus = async (req, res) => {
 const listKYCRequests = async (req, res) => {
   try {
     // Parse query params for pagination & filtering
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = parseInt(req.query.page) ;
+    const limit = parseInt(req.query.limit);
     const status = req.query.status; // optional: pending, approved, rejected
 
     const filter = {};
@@ -308,6 +316,7 @@ const getAccountStatement = async (req, res) => {
 
     // Step 6: Send response
     res.status(200).json({
+       accountId: account._id,
       accountNumber: account.accountNumber,
       statement,
     });
@@ -372,22 +381,31 @@ const adminUpdateAccount = async (req, res) => {
 };
 
 const adminDeleteAccount = async (req, res) => {
-  try {
-    const accountId = req.params.id;
+ try {
+    const { email } = req.body; // 👈 get email from form
 
-    // Find the account
-    const account = await Account.findById(accountId);
-    if (!account) {
-      return res.status(404).json({ message: "Account not found" });
+    // 1. Find the user
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
 
-    // Delete the account
-    await Account.findByIdAndDelete(accountId);
+    // 2. Find the account
+    const account = await Account.findOne({ user: user._id });
+    if (!account) {
+      return res.status(404).json({ message: "Account not found for this user" });
+    }
 
-    // Optionally, you can update user's KYC status or delete the user as well
-    await User.findByIdAndUpdate(account.user, { kycStatus: "deleted" });
+    // 3. Delete account
+    await Account.findByIdAndDelete(account._id);
+    await User.findByIdAndDelete(user._id);
 
-    res.status(200).json({ message: "Account deleted successfully" });
+    // 4. Optionally mark user as "accountDeleted"
+    await User.findByIdAndUpdate(user._id, { kycStatus: "deleted" });
+
+    return res.status(200).json({
+      message: `Account for ${email} deleted successfully`,
+    });
   } catch (error) {
     console.error("Admin delete account error:", error);
     res.status(500).json({ message: "Server error" });
@@ -423,6 +441,72 @@ const downloadAccountStatement = async (req, res) => {
 };
 
 
+const createUserAndAccount = async (req, res) => {
+  try {
+    const { name, email, password, aadhar, pan, dob, address, accountType, phone } = req.body;
+
+    // 1. Check if user exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser)
+      return res.status(400).json({ message: "User already exists" });
+
+    // 2. Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3. Create user
+    const user = new User({
+      name,
+      email,
+      password: hashedPassword,
+      aadhar,
+      pan,
+      dob,
+      address,
+      accountType,
+      phone,
+      isAdmin: false,
+    });
+    await user.save();
+
+    // 4. Generate unique account number
+    const accountNumber = await generateAccountNumber();
+
+    // 5. Create account
+    const account = new Account({
+      user: user._id,
+      accountType,
+      accountNumber,  // 👈 new field
+      kycStatus: "approved",
+      kycDetails: {
+        address,
+        phone,
+        dob,
+        aadhar,
+        pan,
+      },
+    });
+    await account.save();
+
+    // 6. Response
+    return res.status(201).json({
+      message: "User and account created successfully",
+      user,
+      account,
+    });
+  } catch (err) {
+    console.error("Error creating user/account:", err);
+    return res.status(500).json({
+      message: "User creation failed",
+      error: err.message,
+    });
+  }
+};
+
+
+
+
+
+
 module.exports = {
   submitKYC,
   updateKYCStatus,
@@ -431,5 +515,6 @@ module.exports = {
   getAccountStatement,
   adminUpdateAccount,
   adminDeleteAccount,
-  downloadAccountStatement
+  downloadAccountStatement,
+  createUserAndAccount
 };

@@ -22,7 +22,8 @@ const accountSchema = new mongoose.Schema({
     aadhar: String,
     pan: String,
     dob: Date,
-    address: String
+    address: String,
+    phone: String,
     // later: aadharImage, panImage
   },
   kycStatus: {

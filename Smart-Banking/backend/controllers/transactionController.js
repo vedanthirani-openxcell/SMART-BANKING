@@ -113,28 +113,26 @@ Thank you for banking with us!
     res.status(400).json({ message: error.message || "Server error." });
   }
 };
-
 exports.depositFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { accountNumber, amount, description } = req.body;
+    const userId = req.user.user; // logged-in user
+    const { amount, description } = req.body;
 
-    if (!accountNumber || !amount) {
-      throw new Error("Account number and amount are required.");
-    }
-    if (amount <= 0) {
+    if (!amount || amount <= 0) {
       throw new Error("Amount must be greater than zero.");
     }
 
-    const account = await Account.findOne({ accountNumber })
+    // Get logged-in user's account
+    const account = await Account.findOne({ user: userId })
       .populate("user", "name email")
       .session(session);
+
     if (!account) {
       throw new Error("Account not found.");
     }
-
     if (account.kycStatus !== "approved") {
       throw new Error("Account KYC must be approved.");
     }
@@ -142,30 +140,28 @@ exports.depositFunds = async (req, res) => {
     // Add balance
     account.balance += amount;
     await account.save({ session });
-    const userEmail = account.user.email; // make sure you populate email
-    console.log(userEmail);
+
     const subject = "Deposit Successful";
     const text = `Hello ${account.user.name},
 
-An amount of ₹${amount} has been deposited to your account (${accountNumber}).
+An amount of ₹${amount} has been deposited to your account (${account.accountNumber}).
 
 Description: ${description || "Deposit"}
 Updated Balance: ₹${account.balance}
 
 Thank you for banking with us!
 `;
-
-    await sendEmail(userEmail, subject, text);
+    await sendEmail(account.user.email, subject, text);
 
     // Record transaction
     const transaction = await Transaction.create(
       [
         {
-          fromAccount: null, // no sender for deposit
+          fromAccount: null,
           toAccount: account._id,
           toUserName: account.user.name,
           amount,
-          description: description || `Deposit to account ${accountNumber}`,
+          description: description || `Deposit to account ${account.accountNumber}`,
           status: "success",
           type: "deposit",
         },
@@ -176,10 +172,7 @@ Thank you for banking with us!
     await session.commitTransaction();
     session.endSession();
 
-    res.status(200).json({
-      message: "Deposit successful.",
-      transaction: transaction[0],
-    });
+    res.status(200).json({ message: "Deposit successful.", transaction: transaction[0] });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -191,61 +184,45 @@ exports.withdrawFunds = async (req, res) => {
   session.startTransaction();
 
   try {
-    const { accountNumber, amount, description } = req.body;
+    const userId = req.user.user; // logged-in user
+    const { amount, description } = req.body;
 
-    if (!accountNumber || !amount) {
-      throw new Error("Account number and amount are required.");
-    }
-    if (amount <= 0) {
+    if (!amount || amount <= 0) {
       throw new Error("Amount must be greater than zero.");
     }
 
-    const account = await Account.findOne({ accountNumber })
+    const account = await Account.findOne({ user: userId })
       .populate("user", "name email")
       .session(session);
 
-    if (!account) {
-      throw new Error("Account not found.");
-    }
+    if (!account) throw new Error("Account not found.");
+    if (account.kycStatus !== "approved") throw new Error("Account KYC must be approved.");
+    if (account.balance < amount) throw new Error("Insufficient balance.");
 
-    if (account.kycStatus !== "approved") {
-      throw new Error("Account KYC must be approved.");
-    }
-
-    if (account.balance < amount) {
-      throw new Error("Insufficient balance.");
-    }
-
-    // Subtract balance
+    // Deduct balance
     account.balance -= amount;
     await account.save({ session });
-
-    const userEmail = account.user.email;
-    console.log(userEmail);
 
     const subject = "Withdrawal Successful";
     const text = `Hello ${account.user.name},
 
-An amount of ₹${amount} has been withdrawn from your account (${accountNumber}).
+An amount of ₹${amount} has been withdrawn from your account (${account.accountNumber}).
 
 Description: ${description || "Withdrawal"}
 Updated Balance: ₹${account.balance}
 
 Thank you for banking with us!
 `;
+    await sendEmail(account.user.email, subject, text);
 
-    await sendEmail(userEmail, subject, text);
-
-    // Record transaction
     const transaction = await Transaction.create(
       [
         {
           fromAccount: account._id,
-          toAccount: null, // no receiver for withdrawal
           fromUserName: account.user.name,
+          toAccount: null,
           amount,
-          description:
-            description || `Withdrawal from account ${accountNumber}`,
+          description: description || `Withdrawal from account ${account.accountNumber}`,
           status: "success",
           type: "withdrawal",
         },
@@ -256,16 +233,14 @@ Thank you for banking with us!
     await session.commitTransaction();
     session.endSession();
 
-    res.status(200).json({
-      message: "Withdrawal successful.",
-      transaction: transaction[0],
-    });
+    res.status(200).json({ message: "Withdrawal successful.", transaction: transaction[0] });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     res.status(400).json({ message: error.message || "Server error." });
   }
 };
+
 
 exports.getTransactionHistory = async (req, res) => {
   try {
@@ -281,8 +256,8 @@ exports.getTransactionHistory = async (req, res) => {
     }
 
     // Step 1: Parse query params with defaults
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = parseInt(req.query.page) ;
+    const limit = parseInt(req.query.limit) ;
     const type = req.query.type; // optional: deposit, withdrawal, transfer
     const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
     const toDate = req.query.toDate ? new Date(req.query.toDate) : null;

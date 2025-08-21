@@ -3,35 +3,56 @@ import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import api from "../api/api";
 
-const Transactions = () => {
+const UserTransactions = () => {
   const [transactions, setTransactions] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
-    const fetchTransactions = async () => {
+    const fetchData = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await api.get("/admin/transactions", {
+
+        // 1️⃣ Get current user
+        const userRes = await api.get("/users/me", {
           headers: { Authorization: `Bearer ${token}` },
         });
+        setCurrentUser(userRes.data);
 
-        // only keep latest 10
-        setTransactions(res.data.transactions || []);
+        // 2️⃣ Get transactions
+        const txRes = await api.get("/users/history", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setTransactions(txRes.data.transactions || []); // adjust if API shape is different
       } catch (err) {
-        console.error("Error fetching transactions:", err.response?.data || err.message);
+        console.error(
+          "Error fetching data:",
+          err.response?.data || err.message
+        );
       }
     };
 
-    fetchTransactions();
+    fetchData();
   }, []);
+
+  const getInOut = (tx) => {
+    if (tx.type === "deposit") return "Credit";
+    if (tx.type === "withdrawal") return "Debit";
+    if (tx.type === "transfer" && currentUser) {
+      if (tx.toAccount?.userName === currentUser.name) return "Credit";
+      if (tx.fromAccount?.userName === currentUser.name) return "Debit";
+    }
+    return "-";
+  };
 
   return (
     <div className="flex">
-      <Sidebar />
+      <Sidebar role="user" />
+
       <div className="flex-1 flex flex-col min-h-screen bg-gray-100">
         <Header title="Transactions" />
 
         <div className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Recent Transactions</h2>
+          <h2 className="text-lg font-semibold mb-4">My Transactions</h2>
           <div className="overflow-x-auto bg-white shadow rounded-lg">
             <table className="min-w-full text-sm text-gray-700">
               <thead className="bg-gray-200 text-xs uppercase text-gray-600">
@@ -73,15 +94,7 @@ const Transactions = () => {
                           {tx.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2">
-                        {tx.type === "deposit"
-                          ? "credit"
-                          : tx.type === "withdrawal"
-                          ? "debit"
-                          : tx.type === "transfer"
-                          ? "Transfer"
-                          : "-"}
-                      </td>
+                      <td className="px-4 py-2">{getInOut(tx)}</td>
                     </tr>
                   ))
                 ) : (
@@ -100,4 +113,4 @@ const Transactions = () => {
   );
 };
 
-export default Transactions;
+export default UserTransactions;

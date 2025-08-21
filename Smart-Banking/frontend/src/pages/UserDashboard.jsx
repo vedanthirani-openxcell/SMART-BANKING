@@ -1,29 +1,72 @@
-import React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import Sidebar from "../components/Sidebar";
+import Header from "../components/Header";
+import Card from "../components/Card";
+import api from "../api/api";
 
 const UserDashboard = () => {
-  const navigate = useNavigate();
+  const [userStats, setUserStats] = useState({
+    totalAccounts: 0,
+    totalBalance: 0,
+    totalTransactions: 0,
+    kycStatus: "pending",
+  });
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    navigate("/"); // redirect to landing
-  };
+  const [accountNumbers, setAccountNumbers] = useState([]); // ⚡ added
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // Fetch user profile for balance & KYC
+        const profileRes = await api.get("/users/me", { headers });
+        const { balance, kycStatus = "pending" } = profileRes.data;
+
+        // Fetch transactions
+        const transactionsRes = await api.get("/users/history", { headers });
+        const transactions = transactionsRes.data.transactions || [];
+        const accountIds = [...new Set(transactions.map((t) => t.accountId))];
+
+        // ⚡ Fetch accounts (same as UserStatement)
+        const accountsRes = await api.get("/users/accounts/statements", { headers });
+        setAccountNumbers([accountsRes.data.accountNumber]); 
+
+        setUserStats({
+          totalAccounts: accountIds.length,
+          totalBalance: balance,
+          totalTransactions: transactions.length,
+          kycStatus,
+        });
+      } catch (err) {
+        console.error("Error fetching user data:", err.response?.data || err.message);
+      }
+    };
+
+    fetchUserData();
+  }, []);
+
+ 
 
   return (
-    <div className="p-6 text-center">
-      <h1 className="text-3xl font-bold">User Dashboard</h1>
-      <p className="mt-4">Welcome, User!</p>
+    <div className="flex">
+      <Sidebar role="user" />
+      <div className="flex-1 flex flex-col min-h-screen bg-gray-100">
+        <Header title="User Dashboard" />
 
-      <button
-        onClick={handleLogout}
-        className="mt-6 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition"
-      >
-        Logout
-      </button>
+        {/* Stats Cards */}
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card title="Account Number" value={accountNumbers.join(", ") || "N/A"} /> {/* ⚡ added */}
+          <Card title="Total Accounts" value={userStats.totalAccounts} />
+          <Card title="Total Balance" value={`₹${userStats.totalBalance}`} />
+          <Card title="Transactions" value={userStats.totalTransactions} />
+          <Card title="KYC Status" value={userStats.kycStatus} />
+        </div>
+       
+      </div>
     </div>
   );
 };
 
 export default UserDashboard;
-
